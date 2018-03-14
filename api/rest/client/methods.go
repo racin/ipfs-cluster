@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/url"
+	"time"
 
 	cid "github.com/ipfs/go-cid"
 	peer "github.com/libp2p/go-libp2p-peer"
@@ -60,12 +61,16 @@ func (c *Client) Pin(ci *cid.Cid, replicationFactorMin, replicationFactorMax int
 	escName := url.QueryEscape(name)
 	err := c.do(
 		"POST",
-		fmt.Sprintf("/pins/%s?replication_factor_min=%d&replication_factor_max=%d&name=%s",
+		fmt.Sprintf(
+			"/pins/%s?replication_factor_min=%d&replication_factor_max=%d&name=%s",
 			ci.String(),
 			replicationFactorMin,
 			replicationFactorMax,
-			escName),
-		nil, nil)
+			escName,
+		),
+		nil,
+		nil,
+	)
 	return err
 }
 
@@ -171,4 +176,38 @@ func (c *Client) GetConnectGraph() (api.ConnectGraphSerial, error) {
 	var graphS api.ConnectGraphSerial
 	err := c.do("GET", "/health/graph", nil, &graphS)
 	return graphS, err
+}
+
+// WaitFor is a utility function that allows for a caller to
+// wait for a paticular status for a CID. It returns a channel
+// upon which the caller can wait for the targetStatus.
+func (c *Client) WaitFor(ci *cid.Cid, local bool, target api.TrackerStatus, checkFreq time.Duration) <-chan api.TrackerStatus {
+	statusCh := make(chan api.TrackerStatus)
+
+	go func(statusCh chan api.TrackerStatus) {
+		for {
+			gblPinInfo, err := c.Status(ci, local)
+			if err != nil {
+				// TODO(ajl): check how logging is done in ipfs-cluster
+				logger.Errorf("failed to get pin status: %v", err)
+				// TODO(ajl): check I can override api.TrackerStatusBug here for
+				// error reporting purposes or return an error chan,
+				// not sure which is the best option.
+				statusCh <- api.TrackerStatusBug
+			}
+			for _, pinInfo := range gblPinInfo.PeerMap {
+				if target != pinInfo.Status {
+					// one of the peers has a status that doesn't match target
+					goto wait
+				}
+			}
+			// NOTE: this code shouldn't be reached unless all peers have the target status
+			statusCh <- target
+			return
+		wait:
+			time.Sleep(checkFreq)
+		}
+	}(statusCh)
+
+	return statusCh
 }

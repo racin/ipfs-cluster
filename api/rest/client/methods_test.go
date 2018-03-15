@@ -1,6 +1,7 @@
 package client
 
 import (
+	"context"
 	"log"
 	"testing"
 	"time"
@@ -277,11 +278,15 @@ func TestClient_WaitFor(t *testing.T) {
 
 			t.Errorf("failed to perform setup %s: %v", tt.name, err)
 
-			statusCh := c.WaitFor(tt.args.ci, tt.args.local, tt.args.target, tt.args.checkFreq)
+			ctx := context.Background()
+			statusCh, errCh := c.WaitFor(ctx, tt.args.ci, tt.args.local, tt.args.target, tt.args.checkFreq)
 			for {
 				select {
 				case stat := <-statusCh:
 					log.Printf("%#v\n", stat)
+					return
+				case err := <-errCh:
+					log.Printf("%#v\n", err)
 					return
 				}
 			}

@@ -182,18 +182,21 @@ func (c *Client) GetConnectGraph() (api.ConnectGraphSerial, error) {
 // WaitFor is a utility function that allows for a caller to
 // wait for a paticular status for a CID. It returns a channel
 // upon which the caller can wait for the targetStatus.
-func (c *Client) WaitFor(ctx context.Context, ci *cid.Cid, local bool, target api.TrackerStatus, checkFreq time.Duration) (<-chan api.TrackerStatus, <-chan error) {
-	statusCh := make(chan api.TrackerStatus)
+func (c *Client) WaitFor(ctx context.Context, ci *cid.Cid, local bool, target api.TrackerStatus, checkFreq time.Duration) (<-chan api.GlobalPinInfo, <-chan struct{}, <-chan error) {
+	statusCh := make(chan api.GlobalPinInfo)
+	doneCh := make(chan struct{})
 	errCh := make(chan error)
 
 	go func() {
 		ticker := time.NewTicker(checkFreq)
 		defer ticker.Stop()
+		defer close(statusCh)
+		defer close(errCh)
 
-	OUTER:
 		for {
 			select {
 			case <-ctx.Done():
+				errCh <- ctx.Err()
 				return
 			case <-ticker.C:
 				gblPinInfo, err := c.Status(ci, local)
@@ -201,49 +204,43 @@ func (c *Client) WaitFor(ctx context.Context, ci *cid.Cid, local bool, target ap
 					errCh <- err
 					return
 				}
-				for _, pinInfo := range gblPinInfo.PeerMap {
-					switch pinInfo.Status {
-					case target:
-						continue
-					case api.TrackerStatusBug, api.TrackerStatusClusterError, api.TrackerStatusPinError, api.TrackerStatusUnpinError:
-						errCh <- fmt.Errorf("error has occurred with cid: %s", ci.String())
-						statusCh <- pinInfo.Status
-						return
-					case api.TrackerStatusRemote:
-						if target == api.TrackerStatusPinned {
-							continue // to next pinInfo
-						}
-						statusCh <- pinInfo.Status
-						continue OUTER
-					default:
-						statusCh <- pinInfo.Status
-						continue OUTER
-					}
+
+				ok, err := statusReached(target, gblPinInfo)
+				if err != nil {
+					errCh <- err
+					return
 				}
-				// NOTE: this code shouldn't be reached unless all peers have the target status
-				statusCh <- target
+
+				if !ok {
+					statusCh <- gblPinInfo
+					continue
+				}
+
+				statusCh <- gblPinInfo
+				close(doneCh)
 				return
 			}
 		}
 	}()
 
-	return statusCh, errCh
+	return statusCh, doneCh, errCh
 }
 
-// WaitForPinnedStatus ...
-func (c *Client) WaitForPinnedStatus(ctx context.Context, ci *cid.Cid, local bool, checkFreq time.Duration) (bool, error) {
-	statusCh, errCh := c.WaitFor(ctx, ci, local, api.TrackerStatusPinned, checkFreq)
-	for {
-		select {
-		case err := <-errCh:
-			var status api.TrackerStatus
-			if len(statusCh) > 1 {
-				status = <-statusCh
-				return false, fmt.Errorf("%v: %s", err, status.String())
+func statusReached(target api.TrackerStatus, gblPinInfo api.GlobalPinInfo) (bool, error) {
+	for _, pinInfo := range gblPinInfo.PeerMap {
+		switch pinInfo.Status {
+		case target:
+			continue
+		case api.TrackerStatusBug, api.TrackerStatusClusterError, api.TrackerStatusPinError, api.TrackerStatusUnpinError:
+			return false, fmt.Errorf("error has occurred while attempting to reach status: %s", target.String())
+		case api.TrackerStatusRemote:
+			if target == api.TrackerStatusPinned {
+				continue // to next pinInfo
 			}
-			return false, err
-		case <-statusCh:
-			return true, nil
+			return false, nil
+		default:
+			return false, nil
 		}
 	}
+	return true, nil
 }

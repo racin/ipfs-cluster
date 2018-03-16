@@ -1,15 +1,11 @@
 package client
 
 import (
-	"context"
-	"log"
 	"testing"
-	"time"
 
 	cid "github.com/ipfs/go-cid"
 	ma "github.com/multiformats/go-multiaddr"
 
-	"github.com/ipfs/ipfs-cluster/api"
 	"github.com/ipfs/ipfs-cluster/test"
 )
 
@@ -226,70 +222,5 @@ func TestGetConnectGraph(t *testing.T) {
 	if len(cg.IPFSLinks) != 3 || len(cg.ClusterLinks) != 3 ||
 		len(cg.ClustertoIPFS) != 3 {
 		t.Fatal("Bad graph")
-	}
-}
-
-func TestClient_WaitFor(t *testing.T) {
-	ci, _ := cid.Decode(test.TestCid1)
-	type args struct {
-		ci        *cid.Cid
-		local     bool
-		target    api.TrackerStatus
-		checkFreq time.Duration
-	}
-	tests := []struct {
-		name string
-		args args
-		want api.TrackerStatus
-	}{
-		{
-			"unpin",
-			args{
-				ci,
-				false,
-				api.TrackerStatusUnpinned,
-				2 * time.Second,
-			},
-			api.TrackerStatusUnpinned,
-		},
-		{
-			"pin",
-			args{
-				ci,
-				false,
-				api.TrackerStatusPinned,
-				2 * time.Second,
-			},
-			api.TrackerStatusPinned,
-		},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			c, api := testClient(t)
-			defer api.Shutdown()
-
-			var err error
-			switch tt.name {
-			case "unpin":
-				err = c.Pin(ci, 1, 1, "test-pin")
-			case "pin":
-				err = c.Unpin(ci)
-			}
-
-			t.Errorf("failed to perform setup %s: %v", tt.name, err)
-
-			ctx := context.Background()
-			statusCh, errCh := c.WaitFor(ctx, tt.args.ci, tt.args.local, tt.args.target, tt.args.checkFreq)
-			for {
-				select {
-				case stat := <-statusCh:
-					log.Printf("%#v\n", stat)
-					return
-				case err := <-errCh:
-					log.Printf("%#v\n", err)
-					return
-				}
-			}
-		})
 	}
 }

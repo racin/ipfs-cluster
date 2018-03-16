@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"io"
@@ -272,6 +273,15 @@ peers should pin this content.
 							Name:  "no-status, ns",
 							Usage: "Prevents fetching pin status after pinning (faster, quieter)",
 						},
+						cli.BoolFlag{
+							Name:  "wait, w",
+							Usage: "Waits for all nodes to report a status of pinned before returning",
+						},
+						cli.DurationFlag{
+							Name:  "wait-timeout, wt",
+							Value: 0,
+							Usage: "Specify how long (in seconds) you are willing to wait for pinned status (default is indefinitely)",
+						},
 					},
 					Action: func(c *cli.Context) error {
 						cidStr := c.Args().First()
@@ -291,11 +301,46 @@ peers should pin this content.
 							formatResponse(c, nil, cerr)
 							return nil
 						}
-						if !c.Bool("no-status") {
+
+						// handle boolean flags
+						switch {
+						case !c.Bool("no-status"):
 							time.Sleep(1000 * time.Millisecond)
 							resp, cerr := globalClient.Status(ci, false)
 							formatResponse(c, resp, cerr)
+						case c.Bool("wait"):
+							checkFreq := 1 * time.Second
+							waitTimeout := c.Duration("wait-timeout")
+							ctx := context.Background()
+
+							if waitTimeout > checkFreq {
+								var cancel context.CancelFunc
+								ctx, cancel = context.WithTimeout(ctx, waitTimeout)
+								defer cancel()
+							}
+
+							statusCh, doneCh, errCh := globalClient.WaitFor(ctx, ci, false, api.TrackerStatusPinned, checkFreq)
+
+							for {
+								select {
+								case <-ctx.Done():
+									formatResponse(c, nil, ctx.Err())
+									return nil
+								case err := <-errCh:
+									formatResponse(c, nil, err)
+									return nil
+								case status := <-statusCh:
+									formatResponse(c, status, nil)
+								case <-doneCh:
+									// drain statusCh
+									for s := range statusCh {
+										formatResponse(c, s, nil)
+									}
+									return nil
+								}
+							}
 						}
+
 						return nil
 					},
 				},
@@ -316,6 +361,10 @@ although unpinning operations in the cluster may take longer or fail.
 							Name:  "no-status, ns",
 							Usage: "Prevents fetching pin status after unpinning (faster, quieter)",
 						},
+						cli.BoolFlag{
+							Name:  "wait, w",
+							Usage: "Waits for all nodes to report a status of pinned before returning",
+						},
 					},
 					Action: func(c *cli.Context) error {
 						cidStr := c.Args().First()
@@ -326,11 +375,17 @@ although unpinning operations in the cluster may take longer or fail.
 							formatResponse(c, nil, cerr)
 							return nil
 						}
-						if !c.Bool("no-status") {
+
+						// handle boolean flags
+						switch {
+						case !c.Bool("no-status"):
 							time.Sleep(1000 * time.Millisecond)
 							resp, cerr := globalClient.Status(ci, false)
 							formatResponse(c, resp, cerr)
+						case c.Bool("wait"):
+							// TODO(ajl): globalClient.WaitForUnpinnedStatus
 						}
+
 						return nil
 					},
 				},

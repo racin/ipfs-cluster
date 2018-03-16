@@ -14,9 +14,23 @@ test_expect_success IPFS,CLUSTER "pin data to cluster with ctl" '
     ipfs-cluster-ctl status "$cid" | grep -q -i "PINNED"
 '
 
+test_expect_success IPFS,CLUSTER "wait for data to pin to cluster with ctl" '
+    cid=`docker exec ipfs sh -c "echo test | ipfs add -q"`
+    ipfs-cluster-ctl pin add --wait "$cid" &&
+    ipfs-cluster-ctl pin ls "$cid" | grep -q "$cid" &&
+    ipfs-cluster-ctl status "$cid" | grep -q -i "PINNED"
+'
+
 test_expect_success IPFS,CLUSTER "unpin data from cluster with ctl" '
     cid=`ipfs-cluster-ctl --enc=json pin ls | jq -r ".[] | .cid" | head -1`
     ipfs-cluster-ctl pin rm "$cid" &&
+    !(ipfs-cluster-ctl pin ls "$cid" | grep -q "$cid") &&
+    ipfs-cluster-ctl status "$cid" | grep -q -i "UNPINNED"
+'
+
+test_expect_success IPFS,CLUSTER "wait for data to unpin from cluster with ctl" '
+    cid=`ipfs-cluster-ctl --enc=json pin ls | jq -r ".[] | .cid" | head -1`
+    ipfs-cluster-ctl pin rm --wait "$cid" &&
     !(ipfs-cluster-ctl pin ls "$cid" | grep -q "$cid") &&
     ipfs-cluster-ctl status "$cid" | grep -q -i "UNPINNED"
 '

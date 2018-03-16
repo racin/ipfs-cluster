@@ -270,7 +270,6 @@ func (c *Cluster) pushInformerMetrics() {
 	// The following control how often to make and log
 	// a retry
 	retries := 0
-	retryDelay := 500 * time.Millisecond
 	retryWarnMod := 60
 	for {
 		select {
@@ -291,7 +290,7 @@ func (c *Cluster) pushInformerMetrics() {
 				retries++
 			}
 			// retry in retryDelay
-			timer.Reset(retryDelay)
+			timer.Reset(metric.GetTTL() / 4)
 			continue
 		}
 

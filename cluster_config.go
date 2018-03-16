@@ -29,6 +29,7 @@ const (
 	DefaultStateSyncInterval   = 60 * time.Second
 	DefaultIPFSSyncInterval    = 130 * time.Second
 	DefaultMonitorPingInterval = 15 * time.Second
+	DefaultPeerWatchInterval   = 5 * time.Second
 	DefaultReplicationFactor   = -1
 	DefaultLeaveOnShutdown     = false
 )
@@ -105,10 +106,16 @@ type Config struct {
 	// possible.
 	ReplicationFactorMin int
 
-	// MonitorPingInterval is frequency by which a cluster peer pings the
-	// monitoring component. The ping metric has a TTL set to the double
+	// MonitorPingInterval is the frequency by which a cluster peer pings
+	// the monitoring component. The ping metric has a TTL set to the double
 	// of this value.
 	MonitorPingInterval time.Duration
+
+	// PeerWatchInterval is the frequency that we watch for changes
+	// in the consensus peerset and save new peers to the configuration
+	// file. This also affects how soon we realize that we have
+	// been removed from a cluster.
+	PeerWatchInterval time.Duration
 }
 
 // configJSON represents a Cluster configuration as it will look when it is
@@ -129,6 +136,7 @@ type configJSON struct {
 	ReplicationFactorMin int      `json:"replication_factor_min"`
 	ReplicationFactorMax int      `json:"replication_factor_max"`
 	MonitorPingInterval  string   `json:"monitor_ping_interval"`
+	PeerWatchInterval    string   `json:"peer_watch_interval"`
 }
 
 // ConfigKey returns a human-readable string to identify
@@ -204,6 +212,10 @@ func (cfg *Config) Validate() error {
 		return errors.New("cluster.monitoring_interval is invalid")
 	}
 
+	if cfg.PeerWatchInterval <= 0 {
+		return errors.New("cluster.peer_watch_interval is invalid")
+	}
+
 	rfMax := cfg.ReplicationFactorMax
 	rfMin := cfg.ReplicationFactorMin
 
@@ -253,6 +265,7 @@ func (cfg *Config) setDefaults() {
 	cfg.ReplicationFactorMin = DefaultReplicationFactor
 	cfg.ReplicationFactorMax = DefaultReplicationFactor
 	cfg.MonitorPingInterval = DefaultMonitorPingInterval
+	cfg.PeerWatchInterval = DefaultPeerWatchInterval
 }
 
 // LoadJSON receives a raw json-formatted configuration and
@@ -350,10 +363,12 @@ func (cfg *Config) LoadJSON(raw []byte) error {
 	stateSyncInterval := parseDuration(jcfg.StateSyncInterval)
 	ipfsSyncInterval := parseDuration(jcfg.IPFSSyncInterval)
 	monitorPingInterval := parseDuration(jcfg.MonitorPingInterval)
+	peerWatchInterval := parseDuration(jcfg.PeerWatchInterval)
 
 	config.SetIfNotDefault(stateSyncInterval, &cfg.StateSyncInterval)
 	config.SetIfNotDefault(ipfsSyncInterval, &cfg.IPFSSyncInterval)
 	config.SetIfNotDefault(monitorPingInterval, &cfg.MonitorPingInterval)
+	config.SetIfNotDefault(peerWatchInterval, &cfg.PeerWatchInterval)
 
 	cfg.LeaveOnShutdown = jcfg.LeaveOnShutdown
 
@@ -404,6 +419,7 @@ func (cfg *Config) ToJSON() (raw []byte, err error) {
 	jcfg.StateSyncInterval = cfg.StateSyncInterval.String()
 	jcfg.IPFSSyncInterval = cfg.IPFSSyncInterval.String()
 	jcfg.MonitorPingInterval = cfg.MonitorPingInterval.String()
+	jcfg.PeerWatchInterval = cfg.PeerWatchInterval.String()
 
 	raw, err = json.MarshalIndent(jcfg, "", "    ")
 	return

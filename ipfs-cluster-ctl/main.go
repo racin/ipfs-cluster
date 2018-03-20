@@ -319,21 +319,28 @@ peers should pin this content.
 								defer cancel()
 							}
 
-							statusCh, doneCh, errCh := globalClient.WaitFor(ctx, ci, false, api.TrackerStatusPinned, checkFreq)
+							sf := client.NewStatusFilter()
+							fp := client.FilterParams{
+								Cid:       ci,
+								Local:     false,
+								Target:    api.TrackerStatusPinned,
+								CheckFreq: checkFreq,
+							}
+							globalClient.WaitFor(ctx, sf, fp)
 
 							for {
 								select {
 								case <-ctx.Done():
 									formatResponse(c, nil, ctx.Err())
 									return nil
-								case err := <-errCh:
+								case err := <-sf.Err:
 									formatResponse(c, nil, err)
 									return nil
-								case status := <-statusCh:
+								case status := <-sf.Out:
 									formatResponse(c, status, nil)
-								case <-doneCh:
+								case <-sf.Done:
 									// drain statusCh
-									for s := range statusCh {
+									for s := range sf.Out {
 										formatResponse(c, s, nil)
 									}
 									return nil

@@ -179,14 +179,53 @@ func (c *Client) GetConnectGraph() (api.ConnectGraphSerial, error) {
 	return graphS, err
 }
 
-type StatusFilter struct {
+// WaitFor is a utility function that allows for a caller to
+// wait for a paticular status for a CID. It returns a channel
+// upon which the caller can wait for the targetStatus.
+func (c *Client) WaitFor(ctx context.Context, fp StatusFilterParams) (api.GlobalPinInfo, error) {
+	ctx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	sf := newStatusFilter()
+
+	go sf.pollStatus(ctx, c, fp)
+	go sf.filter(ctx, fp)
+
+	var laststatus api.GlobalPinInfo
+	for {
+		select {
+		case <-ctx.Done():
+			return api.GlobalPinInfo{}, ctx.Err()
+		case err := <-sf.Err:
+			cancel()
+			return api.GlobalPinInfo{}, err
+		case status, ok := <-sf.Out:
+			// drain status channel and return last status on channel
+			if !ok {
+				return laststatus, nil
+			}
+			laststatus = status
+		}
+	}
+}
+
+// StatusFilterParams contains the parameters required
+// to filter a stream of status results.
+type StatusFilterParams struct {
+	*cid.Cid
+	Local     bool
+	Target    api.TrackerStatus
+	CheckFreq time.Duration
+}
+
+type statusFilter struct {
 	In, Out chan api.GlobalPinInfo
 	Done    chan struct{}
 	Err     chan error
 }
 
-func NewStatusFilter() *StatusFilter {
-	return &StatusFilter{
+func newStatusFilter() *statusFilter {
+	return &statusFilter{
 		In:   make(chan api.GlobalPinInfo),
 		Out:  make(chan api.GlobalPinInfo),
 		Done: make(chan struct{}),
@@ -194,42 +233,38 @@ func NewStatusFilter() *StatusFilter {
 	}
 }
 
-type FilterParams struct {
-	*cid.Cid
-	Local     bool
-	Target    api.TrackerStatus
-	CheckFreq time.Duration
-}
+func (sf *statusFilter) filter(ctx context.Context, fp StatusFilterParams) {
+	defer close(sf.Done)
+	defer close(sf.Out)
 
-func (sf *StatusFilter) Filter(ctx context.Context, fp FilterParams) {
-	go func() {
-		for {
-			select {
-			case <-ctx.Done():
-				sf.Err <- ctx.Err()
-				return
-			case gblPinInfo := <-sf.In:
-				ok, err := statusReached(fp.Target, gblPinInfo)
-				if err != nil {
-					sf.Err <- err
-					return
-				}
-
-				if !ok {
-					sf.Out <- gblPinInfo
-					continue
-				}
-
-				sf.Out <- gblPinInfo
-				close(sf.Done)
-				close(sf.Out)
+	for {
+		select {
+		case <-ctx.Done():
+			sf.Err <- ctx.Err()
+			return
+		case gblPinInfo, more := <-sf.In:
+			if !more {
 				return
 			}
+
+			ok, err := statusReached(fp.Target, gblPinInfo)
+			if err != nil {
+				sf.Err <- err
+				return
+			}
+
+			if !ok {
+				sf.Out <- gblPinInfo
+				continue
+			}
+
+			sf.Out <- gblPinInfo
+			return
 		}
-	}()
+	}
 }
 
-func (sf *StatusFilter) PollStatus(ctx context.Context, c *Client, fp FilterParams) {
+func (sf *statusFilter) pollStatus(ctx context.Context, c *Client, fp StatusFilterParams) {
 	ticker := time.NewTicker(fp.CheckFreq)
 	defer ticker.Stop()
 
@@ -237,6 +272,7 @@ func (sf *StatusFilter) PollStatus(ctx context.Context, c *Client, fp FilterPara
 		select {
 		case <-ctx.Done():
 			sf.Err <- ctx.Err()
+			close(sf.In)
 			return
 		case <-ticker.C:
 			gblPinInfo, err := c.Status(fp.Cid, fp.Local)
@@ -247,20 +283,9 @@ func (sf *StatusFilter) PollStatus(ctx context.Context, c *Client, fp FilterPara
 			sf.In <- gblPinInfo
 		case <-sf.Done:
 			close(sf.In)
+			return
 		}
 	}
-}
-
-// WaitFor is a utility function that allows for a caller to
-// wait for a paticular status for a CID. It returns a channel
-// upon which the caller can wait for the targetStatus.
-func (c *Client) WaitFor(ctx context.Context, sf *StatusFilter, fp FilterParams) {
-	ctx, cancel := context.WithCancel(ctx)
-	defer cancel()
-
-	go sf.PollStatus(ctx, c, fp)
-	go sf.Filter(ctx, fp)
-	<-sf.Done
 }
 
 func statusReached(target api.TrackerStatus, gblPinInfo api.GlobalPinInfo) (bool, error) {

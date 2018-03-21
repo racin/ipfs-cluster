@@ -58,9 +58,9 @@ type Config struct {
 	// cluster peer, this corresponds to the cluster secret.
 	ProtectorKey []byte
 
-	// ProxyAddr allows to obtain a go-ipfs-api pointing to the
-	// ipfs proxy endpoint of ipfs-cluster. If empty, the location
-	// it will be guessed from the prevalent in PeerAddr/APIAddr/Host,
+	// ProxyAddr is used to obtain a go-ipfs-api Shell instance pointing
+	// to the ipfs proxy endpoint of ipfs-cluster. If empty, the location
+	// will be guessed from one of PeerAddr/APIAddr/Host,
 	// and the port used will be ipfs-cluster's proxy default port (9095)
 	ProxyAddr ma.Multiaddr
 
@@ -206,7 +206,7 @@ func (c *Client) setupProxy() error {
 	case c.config.APIAddr != nil: // Host/Port setupHostname sets APIAddr
 		paddr = ma.Split(c.config.APIAddr)[0].Encapsulate(port)
 	default:
-		return errors.New("cannot guess default proxy address")
+		return errors.New("cannot find proxy address")
 	}
 
 	ctx, cancel := context.WithTimeout(c.ctx, c.config.Timeout)

@@ -72,6 +72,12 @@
       "hash": "QmYvYkxJrMzijvfE9EXsnBF26phUBpcK3cChSjucH5hXUY",
       "name": "go-libp2p-http",
       "version": "1.0.1"
+    },
+    {
+      "author": "ipfs",
+      "hash": "QmVy4MLtcP2V7iFAeQrJ7Kudkc8t8U2VtxVxjBDxpTTj3U",
+      "name": "go-ipfs-api",
+      "version": "1.2.3"
     }
   ],
   "gxVersion": "0.11.0",
